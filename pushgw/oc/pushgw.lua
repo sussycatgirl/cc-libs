@@ -92,6 +92,9 @@ function PushGW.counter(key, startValue)
         ["reset"] = function ()
             value = 0
             PushGW._setMetric(key, value, "counter")
+        end,
+        ["getValue"] = function ()
+            return value
         end
     }
 end
@@ -112,6 +115,9 @@ function PushGW.gauge(key, startValue)
         ["set"] = function (amount)
             value = amount
             PushGW._setMetric(key, value, "gauge")
+        end,
+        ["getValue"] = function ()
+            return value
         end
     }
 end
