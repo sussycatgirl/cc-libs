@@ -11,7 +11,7 @@
 
 local PushGW = {
     ["name"] = "PushGW",
-    ["author"] = "Jan"
+    ["author"] = "Lea"
 }
 
 local internet = require("internet")
