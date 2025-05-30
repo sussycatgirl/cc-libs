@@ -3,16 +3,21 @@
     https://github.com/prometheus/pushgateway
 
     Features:
-    - Unreliable
-    - Partial API coverage (Why does CC only do GET and POST) (I'm also lazy) (+ dont care + ratio)
+    - Partial API coverage (Why does CC only do GET and POST)
+    - unstable label support
     - It kinda works
     - Supports basicauth (haven't tested it without)
 ]]--
 
 local PushGW = {
     ["name"] = "PushGW",
-    ["author"] = "Jan"
+    ["author"] = "sussycatgirl",
+    ["_debug"] = false
 }
+
+function PushGW.setDebug(enable_debug)
+  PushGW._debug = enable_debug
+end
 
 -- https://stackoverflow.com/questions/34618946/lua-base64-encode
 local function b64enc(data)
@@ -50,21 +55,42 @@ function PushGW.useAuthentication(user, pass)
 end
 
 function PushGW._toMetrics(metrics)
-    local metricout = ""
-    for k,v in pairs(metrics) do
-        metricout = metricout
-            .."#TYPE "..k.." "..v.type.."\n"
-            ..k.."{} "..v.value.."\n"
-    end
+  local metricout = ""
 
-    return metricout
+    for k,v in pairs(metrics) do
+    local labels = ""
+    
+    if v.labels ~= nil then
+      for lk, lv in pairs(v.labels) do
+        if string.len(labels) > 0 then
+          labels = labels..","
+        end
+        
+        -- this is supposed to foolproof things a bit
+        -- but you probably cant rely on it to be fully
+        -- safe. be careful if youre passing user input
+        -- to labels
+        local safe_value = string.gsub(lv, "\\", "\\\\")
+        safe_value = string.gsub(safe_value, "\"", "\\\"")
+        
+        labels = labels
+          ..lk.."=\""..safe_value.."\""
+      end
+    end
+    
+    metricout = metricout
+      .."#TYPE "..k.." "..v.type.."\n"
+      ..k.."{"..labels.."} "..v.value.."\n"
+  end
+
+  return metricout
 end
 
-function PushGW._setMetric(k, v, type, tags)
+function PushGW._setMetric(k, v, type, labels)
     PushGW._metrics[k] = {
         ["type"] = type,
         ["value"] = v,
-        ["tags"] = tags
+        ["labels"] = labels
     }
 end
 
@@ -74,25 +100,30 @@ function PushGW.counter(key, startValue)
     local value = startValue
     if value == nil then value = 0 end
     PushGW._setMetric(key, value, "counter")
+    
+    local labels = {}
 
     return {
         ["inc"] = function (amount)
             if amount == nil then amount = 1 end
             if amount < 0 then error("Cannot decrement counter") end
             value = amount + value
-            PushGW._setMetric(key, value, "counter")
+            PushGW._setMetric(key, value, "counter", labels)
         end,
         ["set"] = function (amount)
             if amount < value and amount ~= 0 then error("Cannot decrement counter") end
             value = amount
-            PushGW._setMetric(key, value, "counter")
+            PushGW._setMetric(key, value, "counter", labels)
         end,
         ["reset"] = function ()
             value = 0
-            PushGW._setMetric(key, value, "counter")
+            PushGW._setMetric(key, value, "counter", labels)
         end,
         ["getValue"] = function ()
             return value
+        end,
+        ["label"] = function (name, value)
+            labels[name] = value
         end
     }
 end
@@ -103,19 +134,24 @@ function PushGW.gauge(key, startValue)
     local value = startValue
     if value == nil then value = 0 end
     PushGW._setMetric(key, value, "gauge")
+    
+    local labels = {}
 
     return {
         ["inc"] = function (amount)
             if amount == nil then amount = 1 end
             value = amount + value
-            PushGW._setMetric(key, value, "gauge")
+            PushGW._setMetric(key, value, "gauge", labels)
         end,
         ["set"] = function (amount)
             value = amount
-            PushGW._setMetric(key, value, "gauge")
+            PushGW._setMetric(key, value, "gauge", labels)
         end,
         ["getValue"] = function ()
             return value
+        end,
+        ["label"] = function (name, value)
+            labels[name] = value
         end
     }
 end
@@ -126,12 +162,22 @@ function PushGW.push()
         error("PushGW: push() called without"
             .." calling configure() first")
     end
+    
+    local metrics = PushGW._toMetrics(PushGW._metrics)
+    
+    if PushGW._debug then
+      print("[>] "..metrics)
+    end
 
-    http.post(
+    local res, err, errRes = http.post(
         PushGW.url.."/job/"..PushGW.job,
-        PushGW._toMetrics(PushGW._metrics),
+        metrics,
         PushGW.auth
     )
+    
+    if err ~= nil then
+      error(err)
+    end
 end
 
 return PushGW
